@@ -574,19 +574,15 @@ static void rpcReleaseConn(SRpcConn *pConn) {
     char hashstr[40] = {0};
     size_t size = snprintf(hashstr, sizeof(hashstr), "%x:%x:%x:%d", pConn->peerIp, pConn->linkUid, pConn->peerId, pConn->connType);
     taosHashRemove(pRpc->hash, hashstr, size);
-  
     rpcFreeMsg(pConn->pRspMsg); // it may have a response msg saved, but not request msg
-    pConn->pRspMsg = NULL;
-    pConn->inType = 0;
-    pConn->inTranId = 0;
-  } else {
-    pConn->outType = 0;
-    pConn->outTranId = 0;
-    pConn->pReqMsg = NULL;
-  }
-
-  taosFreeId(pRpc->idPool, pConn->sid);
-  pConn->pContext = NULL;
+  } 
+  
+  // lockedBy can not be reset, since it maybe hold by a thread
+  int sid = pConn->sid;
+  int64_t lockedBy = pConn->lockedBy; 
+  memset(pConn, 0, sizeof(SRpcConn));
+  pConn->lockedBy = lockedBy;
+  taosFreeId(pRpc->idPool, sid);
 
   tTrace("%s, rpc connection is released", pConn->info);
 }
@@ -611,7 +607,6 @@ static SRpcConn *rpcAllocateClientConn(SRpcInfo *pRpc) {
     terrno = TSDB_CODE_RPC_MAX_SESSIONS;
   } else {
     pConn = pRpc->connList + sid;
-    memset(pConn, 0, sizeof(SRpcConn));
 
     pConn->pRpc = pRpc;
     pConn->sid = sid;
@@ -701,7 +696,7 @@ static SRpcConn *rpcGetConnObj(SRpcInfo *pRpc, int sid, SRecvInfo *pRecv) {
   if (pConn) {
     if (pConn->linkUid != pHead->linkUid) {
       terrno = TSDB_CODE_RPC_MISMATCHED_LINK_ID;
-      tError("%s %p %p, linkUid:0x%x is not matched with received:0x%x", pRpc->label, pConn, pHead->ahandle, pConn->linkUid, pHead->linkUid);
+      tError("%s %p %p, linkUid:0x%x is not matched with received:0x%x", pRpc->label, pConn, (void*)pHead->ahandle, pConn->linkUid, pHead->linkUid);
       pConn = NULL;
     }
   }
